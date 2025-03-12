@@ -105,6 +105,15 @@ func (r *NamespaceLabelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 
+	if err := r.updateNamespaceLabels(ctx, req, namespaceLabelList, namespace, protectedPrefixes); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func (r *NamespaceLabelReconciler) updateNamespaceLabels(ctx context.Context, req ctrl.Request, namespaceLabelList namespacelabelv1alpha1.NamespaceLabelList, namespace corev1.Namespace, protectedPrefixes map[string]struct{}) error {
+	logger := log.FromContext(ctx)
 	desiredLabels := make(map[string]string)
 	for _, label := range namespaceLabelList.Items {
 		for key, value := range label.Spec.Labels {
@@ -140,14 +149,13 @@ func (r *NamespaceLabelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		namespace.Labels = updatedLabels
 		if err := r.Update(ctx, &namespace); err != nil {
 			logger.Error(err, "Failed to update NamespaceLabel")
-			return ctrl.Result{}, err
+			return err
 		}
 		logger.Info("Updated Namespace Successfully", "namespace", req.Namespace)
 	} else {
 		logger.Info("Namespace label is already up to date no changes needed")
 	}
-
-	return ctrl.Result{}, nil
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

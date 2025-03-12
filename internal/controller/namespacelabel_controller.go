@@ -18,13 +18,15 @@ package controller
 
 import (
 	"context"
-
+	namespacelabelv1alpha1 "github.com/oshribelay/namespace-label/api/v1alpha1"
+	"github.com/oshribelay/namespace-label/internal/controller/utils"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	namespacelabelv1alpha1 "github.com/oshribelay/namespace-label/api/v1alpha1"
 )
 
 // NamespaceLabelReconciler reconciles a NamespaceLabel object
@@ -47,9 +49,66 @@ type NamespaceLabelReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/reconcile
 func (r *NamespaceLabelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+	logger := log.FromContext(ctx)
+	logger.Info("Reconciling NamespaceLabel", "NamespaceLabel", req.NamespacedName)
 
-	// TODO(user): your logic here
+	var nsLabel namespacelabelv1alpha1.NamespaceLabel
+	if err := r.Get(ctx, req.NamespacedName, &nsLabel); err != nil {
+		if errors.IsNotFound(err) {
+			// NamespaceLabel was deleted, clean up if needed
+			return ctrl.Result{}, nil
+		}
+		logger.Error(err, "Failed to fetch NamespaceLabel")
+		return ctrl.Result{}, err
+	}
+
+	var namespace corev1.Namespace
+	if err := r.Get(ctx, types.NamespacedName{Name: nsLabel.Namespace}, &namespace); err != nil {
+		logger.Error(err, "Failed to fetch Namespace")
+		return ctrl.Result{}, err
+	}
+
+	// Fetch all NamespaceLabel objects in the namespace to merge labels from multiple NamespaceLabel CRs
+	var namespaceLabelList namespacelabelv1alpha1.NamespaceLabelList
+	if err := r.List(ctx, &namespaceLabelList, client.InNamespace(namespace.Name)); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	var protectedPrefixes = map[string]struct{}{
+		"k8s.io/":        {},
+		"kubernetes.io/": {},
+		"openshift.io/":  {},
+	}
+
+	desiredLabels := make(map[string]string)
+	for _, label := range namespaceLabelList.Items {
+		for key, value := range label.Spec.Labels {
+			desiredLabels[key] = value
+		}
+	}
+
+	updatedLabels := make(map[string]string)
+	// copy current namespace labels
+	for k, v := range namespace.GetLabels() {
+		updatedLabels[k] = v
+	}
+
+	// apply desired labels but skip protected ones
+	for k, v := range desiredLabels {
+		if !utils.IsReservedLabel(k, protectedPrefixes) {
+			updatedLabels[k] = v
+		}
+	}
+
+	if !utils.EqualLabels(updatedLabels, nsLabel.GetLabels()) {
+		namespace.Labels = updatedLabels
+		if err := r.Update(ctx, &namespace); err != nil {
+			return ctrl.Result{}, err
+		}
+	} else {
+		logger.Info("Namespace label is already up to date no changes needed")
+		return ctrl.Result{}, nil
+	}
 
 	return ctrl.Result{}, nil
 }

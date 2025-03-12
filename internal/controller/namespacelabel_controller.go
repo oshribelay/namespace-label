@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	namespacelabelv1alpha1 "github.com/oshribelay/namespace-label/api/v1alpha1"
+	"github.com/oshribelay/namespace-label/internal/controller/finalizer"
 	"github.com/oshribelay/namespace-label/internal/controller/utils"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -62,6 +63,22 @@ func (r *NamespaceLabelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
+	if !nsLabel.DeletionTimestamp.IsZero() {
+		// (TODO): handle deletion
+
+		if err := finalizer.RemoveFinalizer(ctx, r.Client, &nsLabel); err != nil {
+			logger.Error(err, "Failed to remove finalizer")
+			return ctrl.Result{}, err
+		}
+
+		return ctrl.Result{}, nil
+	}
+
+	if err := finalizer.EnsureFinalizer(ctx, r.Client, &nsLabel); err != nil {
+		logger.Error(err, "unable to add finalizer")
+		return ctrl.Result{Requeue: true}, err
+	}
+
 	var namespace corev1.Namespace
 	if err := r.Get(ctx, types.NamespacedName{Name: nsLabel.Namespace}, &namespace); err != nil {
 		logger.Error(err, "Failed to fetch Namespace")
@@ -80,17 +97,36 @@ func (r *NamespaceLabelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		"openshift.io/":  {},
 	}
 
-	desiredLabels := make(map[string]string)
-	for _, label := range namespaceLabelList.Items {
-		for key, value := range label.Spec.Labels {
-			desiredLabels[key] = value
+	// Validate the NamespaceLabel CR
+	for key := range nsLabel.Spec.Labels {
+		if utils.IsReservedLabel(key, protectedPrefixes) {
+			logger.Error(nil, "Invalid label: reserved label cannot be modified", "label", key)
+			return ctrl.Result{}, nil // Reject the update
 		}
 	}
 
-	updatedLabels := make(map[string]string)
+	desiredLabels := make(map[string]string)
+	for _, label := range namespaceLabelList.Items {
+		for key, value := range label.Spec.Labels {
+			if !utils.IsReservedLabel(key, protectedPrefixes) {
+				desiredLabels[key] = value
+			}
+		}
+	}
+
 	// copy current namespace labels
-	for k, v := range namespace.GetLabels() {
-		updatedLabels[k] = v
+	updatedLabels := make(map[string]string)
+	for key, value := range namespace.GetLabels() {
+		updatedLabels[key] = value
+	}
+
+	// Remove labels that are no longer desired (if they were added by the operator)
+	for key := range updatedLabels {
+		if !utils.IsReservedLabel(key, protectedPrefixes) {
+			if _, exists := desiredLabels[key]; !exists {
+				delete(updatedLabels, key)
+			}
+		}
 	}
 
 	// apply desired labels but skip protected ones
@@ -100,14 +136,15 @@ func (r *NamespaceLabelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 
-	if !utils.EqualLabels(updatedLabels, nsLabel.GetLabels()) {
+	if !utils.EqualLabels(updatedLabels, namespace.GetLabels()) {
 		namespace.Labels = updatedLabels
 		if err := r.Update(ctx, &namespace); err != nil {
+			logger.Error(err, "Failed to update NamespaceLabel")
 			return ctrl.Result{}, err
 		}
+		logger.Info("Updated Namespace Successfully", "namespace", req.Namespace)
 	} else {
 		logger.Info("Namespace label is already up to date no changes needed")
-		return ctrl.Result{}, nil
 	}
 
 	return ctrl.Result{}, nil

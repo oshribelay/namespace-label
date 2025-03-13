@@ -1,0 +1,11 @@
+apiVersion: namespacelabel.dana.io/v1alpha1
+kind: NamespaceLabel
+metadata:
+  labels:
+    app.kubernetes.io/name: namespace-label
+    app.kubernetes.io/managed-by: kustomize
+  name: namespacelabel-sample2
+spec:
+  labels:
+    c: test-c
+    d: test-d

@@ -1,0 +1,11 @@
+apiVersion: namespacelabel.dana.io/v1alpha1
+kind: NamespaceLabel
+metadata:
+  labels:
+    app.kubernetes.io/name: namespace-label
+    app.kubernetes.io/managed-by: kustomize
+  name: namespacelabel-sample-invalid
+spec:
+  labels:
+    k8s.io/invalid: k8s-invalid
+    kubernetes.io/invalid: kubernetes-invalid

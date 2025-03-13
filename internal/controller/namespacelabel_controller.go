@@ -63,22 +63,6 @@ func (r *NamespaceLabelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
-	if !nsLabel.DeletionTimestamp.IsZero() {
-		// (TODO): handle deletion
-
-		if err := finalizer.RemoveFinalizer(ctx, r.Client, &nsLabel); err != nil {
-			logger.Error(err, "Failed to remove finalizer")
-			return ctrl.Result{}, err
-		}
-
-		return ctrl.Result{}, nil
-	}
-
-	if err := finalizer.EnsureFinalizer(ctx, r.Client, &nsLabel); err != nil {
-		logger.Error(err, "unable to add finalizer")
-		return ctrl.Result{Requeue: true}, err
-	}
-
 	var namespace corev1.Namespace
 	if err := r.Get(ctx, types.NamespacedName{Name: nsLabel.Namespace}, &namespace); err != nil {
 		logger.Error(err, "Failed to fetch Namespace")
@@ -97,10 +81,22 @@ func (r *NamespaceLabelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		"openshift.io/":  {},
 	}
 
+	if !nsLabel.DeletionTimestamp.IsZero() {
+		if err := r.handleDeletion(ctx, req, namespace, nsLabel, protectedPrefixes); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
+	if err := finalizer.EnsureFinalizer(ctx, r.Client, &nsLabel); err != nil {
+		logger.Error(err, "unable to add finalizer")
+		return ctrl.Result{Requeue: true}, err
+	}
+
 	// Validate the NamespaceLabel CR
 	for key := range nsLabel.Spec.Labels {
 		if utils.IsReservedLabel(key, protectedPrefixes) {
-			logger.Error(nil, "Invalid label: reserved label cannot be modified", "label", key)
+			logger.Info("Invalid label: reserved label cannot be modified", "label", key)
 			return ctrl.Result{}, nil // Reject the update
 		}
 	}
@@ -154,6 +150,33 @@ func (r *NamespaceLabelReconciler) updateNamespaceLabels(ctx context.Context, re
 		logger.Info("Updated Namespace Successfully", "namespace", req.Namespace)
 	} else {
 		logger.Info("Namespace label is already up to date no changes needed")
+	}
+	return nil
+}
+
+func (r *NamespaceLabelReconciler) handleDeletion(ctx context.Context, req ctrl.Request, namespace corev1.Namespace, namespaceLabel namespacelabelv1alpha1.NamespaceLabel, protectedPrefixes map[string]struct{}) error {
+	logger := log.FromContext(ctx)
+	namespaceLabelList := namespacelabelv1alpha1.NamespaceLabelList{}
+	if err := r.List(ctx, &namespaceLabelList, client.InNamespace(namespace.Name)); err != nil {
+		logger.Error(err, "Failed to fetch NamespaceLabels")
+		return err
+	}
+
+	// remove the deleted NamespaceLabel from the list
+	for index, label := range namespaceLabelList.Items {
+		if label.Name == namespaceLabel.Name && label.Namespace == namespaceLabel.Namespace {
+			namespaceLabelList.Items[index] = namespaceLabelList.Items[len(namespaceLabelList.Items)-1]
+			namespaceLabelList.Items = namespaceLabelList.Items[:len(namespaceLabelList.Items)-1]
+		}
+	}
+
+	if err := r.updateNamespaceLabels(ctx, req, namespaceLabelList, namespace, protectedPrefixes); err != nil {
+		logger.Error(err, "Failed to remove deleted namespaces from the namespace")
+		return err
+	}
+	if err := finalizer.RemoveFinalizer(ctx, r.Client, &namespaceLabel); err != nil {
+		logger.Error(err, "Failed to remove finalizer")
+		return err
 	}
 	return nil
 }

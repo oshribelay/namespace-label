@@ -18,11 +18,14 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	namespacelabelv1alpha1 "github.com/oshribelay/namespace-label/api/v1alpha1"
 	"github.com/oshribelay/namespace-label/internal/controller/finalizer"
+	"github.com/oshribelay/namespace-label/internal/controller/resources"
 	"github.com/oshribelay/namespace-label/internal/controller/utils"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -42,13 +45,6 @@ type NamespaceLabelReconciler struct {
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the NamespaceLabel object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/reconcile
 func (r *NamespaceLabelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("Reconciling NamespaceLabel", "NamespaceLabel", req.NamespacedName)
@@ -75,11 +71,21 @@ func (r *NamespaceLabelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
-	var protectedPrefixes = map[string]struct{}{
-		"k8s.io/":        {},
-		"kubernetes.io/": {},
-		"openshift.io/":  {},
+	var protectedLabelsConfigMap corev1.ConfigMap
+	if err := r.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("%s-protected-labels-configmap", nsLabel.Name), Namespace: nsLabel.Namespace}, &protectedLabelsConfigMap); err != nil {
+		if apierrors.IsNotFound(err) {
+			logger.Info("ConfigMap not created!, creating now...")
+			protectedLabelsConfigMap, err = resources.CreateConfigMap(&nsLabel, r.Client, ctx)
+			if err != nil {
+				logger.Error(err, "Failed to create ConfigMap")
+				return ctrl.Result{}, err
+			}
+		} else {
+			logger.Error(err, "Failed to fetch ConfigMap")
+			return ctrl.Result{}, err
+		}
 	}
+	var protectedPrefixes = protectedLabelsConfigMap.Data
 
 	if !nsLabel.DeletionTimestamp.IsZero() {
 		if err := r.handleDeletion(ctx, req, namespace, nsLabel, protectedPrefixes); err != nil {
@@ -104,11 +110,10 @@ func (r *NamespaceLabelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err := r.updateNamespaceLabels(ctx, req, namespaceLabelList, namespace, protectedPrefixes); err != nil {
 		return ctrl.Result{}, err
 	}
-
 	return ctrl.Result{}, nil
 }
 
-func (r *NamespaceLabelReconciler) updateNamespaceLabels(ctx context.Context, req ctrl.Request, namespaceLabelList namespacelabelv1alpha1.NamespaceLabelList, namespace corev1.Namespace, protectedPrefixes map[string]struct{}) error {
+func (r *NamespaceLabelReconciler) updateNamespaceLabels(ctx context.Context, req ctrl.Request, namespaceLabelList namespacelabelv1alpha1.NamespaceLabelList, namespace corev1.Namespace, protectedPrefixes map[string]string) error {
 	logger := log.FromContext(ctx)
 	desiredLabels := make(map[string]string)
 	for _, label := range namespaceLabelList.Items {
@@ -154,7 +159,7 @@ func (r *NamespaceLabelReconciler) updateNamespaceLabels(ctx context.Context, re
 	return nil
 }
 
-func (r *NamespaceLabelReconciler) handleDeletion(ctx context.Context, req ctrl.Request, namespace corev1.Namespace, namespaceLabel namespacelabelv1alpha1.NamespaceLabel, protectedPrefixes map[string]struct{}) error {
+func (r *NamespaceLabelReconciler) handleDeletion(ctx context.Context, req ctrl.Request, namespace corev1.Namespace, namespaceLabel namespacelabelv1alpha1.NamespaceLabel, protectedPrefixes map[string]string) error {
 	logger := log.FromContext(ctx)
 	namespaceLabelList := namespacelabelv1alpha1.NamespaceLabelList{}
 	if err := r.List(ctx, &namespaceLabelList, client.InNamespace(namespace.Name)); err != nil {

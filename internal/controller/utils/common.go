@@ -3,7 +3,7 @@ package utils
 import "strings"
 
 // IsReservedLabel checks if a label has a protected prefix.
-func IsReservedLabel(label string, protectedPrefixes map[string]struct{}) bool {
+func IsReservedLabel(label string, protectedPrefixes map[string]string) bool {
 	for prefix := range protectedPrefixes {
 		if strings.HasPrefix(label, prefix) {
 			return true

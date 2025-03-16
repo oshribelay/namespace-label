@@ -18,32 +18,43 @@ package controller
 
 import (
 	"context"
+	"fmt"
+	corev1 "k8s.io/api/core/v1"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	namespacelabelv1alpha1 "github.com/oshribelay/namespace-label/api/v1alpha1"
 )
 
 var _ = Describe("NamespaceLabel Controller", func() {
 	Context("When reconciling a resource", func() {
-		const resourceName = "test-resource"
+		const (
+			resourceName = "test-resource"
+			timeout      = time.Second * 10
+			interval     = time.Second * 1
+		)
 
 		ctx := context.Background()
 
 		typeNamespacedName := types.NamespacedName{
 			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+			Namespace: "default",
 		}
 		namespacelabel := &namespacelabelv1alpha1.NamespaceLabel{}
+		configMap := &corev1.ConfigMap{}
 
 		BeforeEach(func() {
 			By("creating the custom resource for the Kind NamespaceLabel")
+			// Delete any existing resources to ensure clean state.
+			k8sClient.Delete(ctx, namespacelabel)
+			k8sClient.Delete(ctx, configMap)
+
+			// Create the NamespaceLabel if it does not exist
 			err := k8sClient.Get(ctx, typeNamespacedName, namespacelabel)
 			if err != nil && errors.IsNotFound(err) {
 				resource := &namespacelabelv1alpha1.NamespaceLabel{
@@ -51,34 +62,210 @@ var _ = Describe("NamespaceLabel Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: namespacelabelv1alpha1.NamespaceLabelSpec{
+						Labels: map[string]string{
+							"testLabel": "test-a",
+						},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
+			By("creating the ConfigMap")
+			// Wait for NamespaceLabel to be created
+			Eventually(func() error {
+				return k8sClient.Get(ctx, typeNamespacedName, namespacelabel)
+			}, timeout, interval).Should(Succeed())
+
+			configMap = &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      fmt.Sprintf("%s-protected-labels-configmap", resourceName),
+					Namespace: typeNamespacedName.Namespace,
+					OwnerReferences: []metav1.OwnerReference{
+						*metav1.NewControllerRef(namespacelabel, namespacelabelv1alpha1.GroupVersion.WithKind("NamespaceLabel")),
+					},
+				},
+				Data: map[string]string{
+					"k8s.io":        "",
+					"kubernetes.io": "",
+					"openshift.io":  "",
+				},
+			}
+
+			// Ensure the ConfigMap is deleted before creating it again
+			err = k8sClient.Delete(context.TODO(), &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      fmt.Sprintf("%s-protected-labels-configmap", resourceName),
+					Namespace: typeNamespacedName.Namespace,
+				},
+			})
+			// Only return an error if the ConfigMap exists and can be deleted
+			Expect(err != nil && !errors.IsNotFound(err)).To(BeFalse())
+
+			Expect(k8sClient.Create(ctx, configMap)).To(Succeed())
+
+			createdConfigMap := &corev1.ConfigMap{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: configMap.Name, Namespace: configMap.Namespace}, createdConfigMap)
+				return err == nil
+			}).Should(BeTrue())
+
+			Expect(configMap.OwnerReferences).ToNot(BeEmpty(), "ConfigMap should have an OwnerReference")
+			Expect(configMap.OwnerReferences[0].Name).To(Equal(resourceName), "ConfigMap should be owned be NamespaceLabel")
 		})
 
 		AfterEach(func() {
-			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &namespacelabelv1alpha1.NamespaceLabel{}
-			err := k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(err).NotTo(HaveOccurred())
-
 			By("Cleanup the specific resource instance NamespaceLabel")
-			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
-		})
-		It("should successfully reconcile the resource", func() {
-			By("Reconciling the created resource")
-			controllerReconciler := &NamespaceLabelReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			// Get the latest version of the NamespaceLabel
+			updatedNsLabel := &namespacelabelv1alpha1.NamespaceLabel{}
+			err := k8sClient.Get(ctx, typeNamespacedName, updatedNsLabel)
+			if err == nil {
+				By("deleting the NamespaceLabel")
+				Expect(k8sClient.Delete(ctx, updatedNsLabel)).To(Succeed())
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
+				By("waiting for the controller to handle deletion")
+				Eventually(func() string {
+					err := k8sClient.Get(ctx, typeNamespacedName, updatedNsLabel)
+					if errors.IsNotFound(err) {
+						return "deleted"
+					}
+					if err != nil {
+						return fmt.Sprintf("error checking resource: %v", err)
+					}
+					return fmt.Sprintf("resource still exists with finalizers: %v", updatedNsLabel.Finalizers)
+				}, timeout, interval).Should(Equal("deleted"), "resource should be fully deleted by the controller")
+
+				By("deleting the ConfigMap")
+				Expect(k8sClient.Delete(ctx, configMap)).To(Succeed())
+
+				By("waiting for the controller to handle deletion")
+				Eventually(func() string {
+					err := k8sClient.Get(ctx, types.NamespacedName{Name: configMap.Name, Namespace: configMap.Namespace}, configMap)
+					if errors.IsNotFound(err) {
+						return "deleted"
+					}
+					if err != nil {
+						return fmt.Sprintf("error checking ConfigMap: %v", err)
+					}
+					return fmt.Sprintf("resource still exists with OwnerReferences: %v", configMap.OwnerReferences)
+				}, timeout, interval).Should(Equal("deleted"), "ConfigMap should be deleted by the controller")
+			}
+		})
+		It("should create the NamespaceLabel if it doesn't exist", func() {
+			By("verifying the NamespaceLabel resource exists")
+			createdNsLabel := &namespacelabelv1alpha1.NamespaceLabel{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, typeNamespacedName, createdNsLabel)
+			}, timeout, interval).Should(Succeed())
+
+			By("verifying the ConfigMap exists")
+			Eventually(func() bool {
+				createdConfigMap := &corev1.ConfigMap{}
+				err := k8sClient.Get(
+					ctx,
+					types.NamespacedName{Name: configMap.Name, Namespace: configMap.Namespace},
+					createdConfigMap,
+				)
+				if err != nil {
+					return false
+				}
+				data, exists := createdConfigMap.Data["k8s.io"]
+				return exists && data == ""
+			}, timeout, interval).Should(BeTrue(), "ConfigMap should exist with protected labels")
+
+			By("verifying details are correct")
+			Expect(createdNsLabel.Spec.Labels).To(Equal(map[string]string{
+				"testLabel": "test-a",
+			}))
+		})
+
+		It("should update the namespace labels when NamespaceLabel is updated", func() {
+			By("updating the NamespaceLabel resource")
+			updatedNsLabel := &namespacelabelv1alpha1.NamespaceLabel{}
+			Eventually(func() error {
+				if err := k8sClient.Get(ctx, typeNamespacedName, updatedNsLabel); err != nil {
+					return err
+				}
+				updatedNsLabel.Spec.Labels["testLabel"] = "test-b"
+				return k8sClient.Update(ctx, updatedNsLabel)
+			}, timeout, interval).Should(Succeed())
+
+			By("verifying the labels were applied")
+			namespace := &corev1.Namespace{}
+			Eventually(func() map[string]string {
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: "default"}, namespace); err != nil {
+					return nil
+				}
+				return namespace.Labels
+			}, timeout, interval).Should(HaveKeyWithValue("testLabel", "test-b"), "namespace labels should match updated labels")
+		})
+
+		It("should delete the labels from the namespace when the NamespaceLabel is deleted", func() {
+			By("deleting the NamespaceLabel resource")
+			deletedNsLabel := &namespacelabelv1alpha1.NamespaceLabel{}
+			Eventually(func() error {
+				if err := k8sClient.Get(ctx, typeNamespacedName, deletedNsLabel); err != nil {
+					return err
+				}
+				return k8sClient.Delete(ctx, deletedNsLabel)
+			}, interval, timeout).Should(Succeed())
+
+			By("waiting for the controller to handle deletion")
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, typeNamespacedName, deletedNsLabel)
+				if errors.IsNotFound(err) {
+					return true
+				}
+				return false
 			})
-			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
+
+			By("verifying the labels were deleted from the namespace")
+			namespace := &corev1.Namespace{}
+			Eventually(func() map[string]string {
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: "default"}, namespace); err != nil {
+					return nil
+				}
+				return namespace.Labels
+			}, timeout, interval).ShouldNot(HaveKeyWithValue("testLabel", "test-a"), "namespace labels should have been deleted")
+		})
+
+		It("should not apply protected label updates to the namespace", func() {
+			By("creating the invalid NamespaceLabel")
+			invalidResource := &namespacelabelv1alpha1.NamespaceLabel{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "invalid-resource",
+					Namespace: "default",
+				},
+				Spec: namespacelabelv1alpha1.NamespaceLabelSpec{
+					Labels: map[string]string{
+						"k8s.io": "test-invalid",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, invalidResource)).To(Succeed())
+
+			By("verifying the label was not applied to the namespace")
+			invalidNamespace := &corev1.Namespace{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: invalidResource.Name, Namespace: invalidResource.Namespace}, invalidResource)
+				if errors.IsNotFound(err) {
+					return false
+				}
+				err = k8sClient.Get(ctx, types.NamespacedName{Name: "default"}, invalidNamespace)
+				if err != nil {
+					return false
+				}
+				return true
+			})
+			Eventually(func() map[string]string {
+				return invalidNamespace.Labels
+			}, timeout, interval).ShouldNot(HaveKeyWithValue("k8s.io", "test-invalid"), "protected label should not have been applied to the namespace")
+			Eventually(func() bool {
+				err := k8sClient.Delete(ctx, invalidResource)
+				if err != nil {
+					return false
+				}
+				return true
+			}, timeout, interval).Should(BeTrue())
 		})
 	})
 })

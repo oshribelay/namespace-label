@@ -3,6 +3,7 @@ package resources
 import (
 	"errors"
 	"fmt"
+
 	"github.com/oshribelay/namespace-label/internal/controller/utils"
 )
 

@@ -19,8 +19,9 @@ package controller
 import (
 	"context"
 	"fmt"
-	corev1 "k8s.io/api/core/v1"
 	"time"
+
+	corev1 "k8s.io/api/core/v1"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -51,8 +52,8 @@ var _ = Describe("NamespaceLabel Controller", func() {
 		BeforeEach(func() {
 			By("creating the custom resource for the Kind NamespaceLabel")
 			// Delete any existing resources to ensure clean state.
-			k8sClient.Delete(ctx, namespacelabel)
-			k8sClient.Delete(ctx, configMap)
+			_ = k8sClient.Delete(ctx, namespacelabel)
+			_ = k8sClient.Delete(ctx, configMap)
 
 			// Create the NamespaceLabel if it does not exist
 			err := k8sClient.Get(ctx, typeNamespacedName, namespacelabel)
@@ -207,7 +208,7 @@ var _ = Describe("NamespaceLabel Controller", func() {
 					return err
 				}
 				return k8sClient.Delete(ctx, deletedNsLabel)
-			}, interval, timeout).Should(Succeed())
+			}, timeout, interval).Should(Succeed())
 
 			By("waiting for the controller to handle deletion")
 			Eventually(func() bool {
@@ -216,7 +217,7 @@ var _ = Describe("NamespaceLabel Controller", func() {
 					return true
 				}
 				return false
-			})
+			}, timeout, interval).Should(BeTrue())
 
 			By("verifying the labels were deleted from the namespace")
 			namespace := &corev1.Namespace{}
@@ -255,7 +256,7 @@ var _ = Describe("NamespaceLabel Controller", func() {
 					return false
 				}
 				return true
-			})
+			}, timeout, interval).Should(BeTrue())
 			Eventually(func() map[string]string {
 				return invalidNamespace.Labels
 			}, timeout, interval).ShouldNot(HaveKeyWithValue("k8s.io", "test-invalid"), "protected label should not have been applied to the namespace")

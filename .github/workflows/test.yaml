@@ -1,0 +1,35 @@
+name: test
+on:
+  pull_request:
+    branches: [ "main", "dev" ]
+
+jobs:
+  run-tests:
+    runs-on: ubuntu-latest
+    name: test
+    env:
+      KIND_VERSION: v0.25.0
+      K8S_VERSION: v1.31.2
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Start kind cluster
+        uses: container-tools/kind-action@v2
+        with:
+          cluster_name: hub
+          version: ${{env.KIND_VERSION}}
+          node_image: kindest/node:${{env.K8S_VERSION}}
+          registry: true
+
+      - name: Run make install
+        run: make install
+
+      - name: Run Make Test
+        run: make test
+

@@ -9,7 +9,7 @@ import (
 
 const namespaceLabelFinalizer = "finalizer.namespacelabel.dana.io"
 
-// EnsureFinalizer adds a finalizer to the NamespaceLabel object
+// EnsureFinalizer adds a finalizer to the NamespaceLabel object.
 func EnsureFinalizer(ctx context.Context, c client.Client, namespaceLabel *v1alpha1.NamespaceLabel) error {
 	if !controllerutil.ContainsFinalizer(namespaceLabel, namespaceLabelFinalizer) {
 		controllerutil.AddFinalizer(namespaceLabel, namespaceLabelFinalizer)
@@ -20,7 +20,7 @@ func EnsureFinalizer(ctx context.Context, c client.Client, namespaceLabel *v1alp
 	return nil
 }
 
-// RemoveFinalizer removes a finalizer from the NamespaceLabel object
+// RemoveFinalizer removes a finalizer from the NamespaceLabel object.
 func RemoveFinalizer(ctx context.Context, c client.Client, namespaceLabel *v1alpha1.NamespaceLabel) error {
 	if controllerutil.ContainsFinalizer(namespaceLabel, namespaceLabelFinalizer) {
 		controllerutil.RemoveFinalizer(namespaceLabel, namespaceLabelFinalizer)

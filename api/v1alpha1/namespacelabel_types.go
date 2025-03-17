@@ -22,6 +22,7 @@ import (
 
 // NamespaceLabelSpec defines the desired state of NamespaceLabel
 type NamespaceLabelSpec struct {
+	// +kubebuilder:doc:note="This field contains labels that will be applied to the namespace. System-reserved labels like 'kubernetes.io/' are not allowed."
 	Labels map[string]string `json:"labels,omitempty"`
 }
 

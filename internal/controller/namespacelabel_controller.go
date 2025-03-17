@@ -49,32 +49,30 @@ func (r *NamespaceLabelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	logger := log.FromContext(ctx)
 	logger.Info("Reconciling NamespaceLabel", "NamespaceLabel", req.NamespacedName)
 
-	var nsLabel namespacelabelv1alpha1.NamespaceLabel
+	nsLabel := namespacelabelv1alpha1.NamespaceLabel{}
 	if err := r.Get(ctx, req.NamespacedName, &nsLabel); err != nil {
 		if errors.IsNotFound(err) {
-			// NamespaceLabel was deleted, clean up if needed
 			return ctrl.Result{}, nil
 		}
 		logger.Error(err, "Failed to fetch NamespaceLabel")
 		return ctrl.Result{}, err
 	}
 
-	var namespace corev1.Namespace
+	namespace := corev1.Namespace{}
 	if err := r.Get(ctx, types.NamespacedName{Name: nsLabel.Namespace}, &namespace); err != nil {
 		logger.Error(err, "Failed to fetch Namespace")
 		return ctrl.Result{}, err
 	}
 
-	// Fetch all NamespaceLabel objects in the namespace to merge labels from multiple NamespaceLabel CRs
-	var namespaceLabelList namespacelabelv1alpha1.NamespaceLabelList
+	namespaceLabelList := namespacelabelv1alpha1.NamespaceLabelList{}
 	if err := r.List(ctx, &namespaceLabelList, client.InNamespace(namespace.Name)); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	var protectedLabelsConfigMap corev1.ConfigMap
+	protectedLabelsConfigMap := corev1.ConfigMap{}
 	if err := r.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("%s-protected-labels-configmap", nsLabel.Name), Namespace: nsLabel.Namespace}, &protectedLabelsConfigMap); err != nil {
 		if apierrors.IsNotFound(err) {
-			logger.Info("ConfigMap not created!, creating now...")
+			logger.Info(fmt.Sprintf("Creating ConfigMap %s-protected-labels-configmap", nsLabel.Name))
 			protectedLabelsConfigMap, err = resources.CreateConfigMap(&nsLabel, r.Client, ctx)
 			if err != nil {
 				logger.Error(err, "Failed to create ConfigMap")
@@ -85,7 +83,11 @@ func (r *NamespaceLabelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			return ctrl.Result{}, err
 		}
 	}
-	var protectedPrefixes = protectedLabelsConfigMap.Data
+	protectedPrefixes := protectedLabelsConfigMap.Data
+
+	if err := resources.ValidateNamespaceLabel(nsLabel.Spec.Labels, protectedPrefixes); err != nil {
+		return ctrl.Result{}, err
+	}
 
 	if !nsLabel.DeletionTimestamp.IsZero() {
 		if err := r.handleDeletion(ctx, req, namespace, nsLabel, protectedPrefixes); err != nil {
@@ -99,21 +101,13 @@ func (r *NamespaceLabelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{Requeue: true}, err
 	}
 
-	// Validate the NamespaceLabel CR
-	for key := range nsLabel.Spec.Labels {
-		if utils.IsReservedLabel(key, protectedPrefixes) {
-			logger.Info("Invalid label: reserved label cannot be modified", "label", key)
-			return ctrl.Result{}, nil // Reject the update
-		}
-	}
-
 	if err := r.updateNamespaceLabels(ctx, req, namespaceLabelList, namespace, protectedPrefixes); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
 }
 
-// updateNamespaceLabels updates the labels of the namespace according to the NamespaceLabel resource
+// updateNamespaceLabels updates the labels of the namespace according to the NamespaceLabel resource.
 func (r *NamespaceLabelReconciler) updateNamespaceLabels(ctx context.Context, req ctrl.Request, namespaceLabelList namespacelabelv1alpha1.NamespaceLabelList, namespace corev1.Namespace, protectedPrefixes map[string]string) error {
 	logger := log.FromContext(ctx)
 	desiredLabels := make(map[string]string)
@@ -125,13 +119,11 @@ func (r *NamespaceLabelReconciler) updateNamespaceLabels(ctx context.Context, re
 		}
 	}
 
-	// copy current namespace labels
 	updatedLabels := make(map[string]string)
 	for key, value := range namespace.GetLabels() {
 		updatedLabels[key] = value
 	}
 
-	// Remove labels that are no longer desired (if they were added by the operator)
 	for key := range updatedLabels {
 		if !utils.IsReservedLabel(key, protectedPrefixes) {
 			if _, exists := desiredLabels[key]; !exists {
@@ -140,14 +132,13 @@ func (r *NamespaceLabelReconciler) updateNamespaceLabels(ctx context.Context, re
 		}
 	}
 
-	// apply desired labels but skip protected ones
 	for k, v := range desiredLabels {
 		if !utils.IsReservedLabel(k, protectedPrefixes) {
 			updatedLabels[k] = v
 		}
 	}
 
-	if !utils.EqualLabels(updatedLabels, namespace.GetLabels()) {
+	if !utils.EqualLabels(updatedLabels, namespace.Labels) {
 		namespace.Labels = updatedLabels
 		if err := r.Update(ctx, &namespace); err != nil {
 			logger.Error(err, "Failed to update NamespaceLabel")
@@ -160,7 +151,7 @@ func (r *NamespaceLabelReconciler) updateNamespaceLabels(ctx context.Context, re
 	return nil
 }
 
-// handleDeletion handles the deletion of the NamespaceLabel object
+// handleDeletion handles the deletion of the NamespaceLabel object.
 func (r *NamespaceLabelReconciler) handleDeletion(ctx context.Context, req ctrl.Request, namespace corev1.Namespace, namespaceLabel namespacelabelv1alpha1.NamespaceLabel, protectedPrefixes map[string]string) error {
 	logger := log.FromContext(ctx)
 	namespaceLabelList := namespacelabelv1alpha1.NamespaceLabelList{}
@@ -169,7 +160,6 @@ func (r *NamespaceLabelReconciler) handleDeletion(ctx context.Context, req ctrl.
 		return err
 	}
 
-	// remove the deleted NamespaceLabel from the list
 	for index, label := range namespaceLabelList.Items {
 		if label.Name == namespaceLabel.Name && label.Namespace == namespaceLabel.Namespace {
 			namespaceLabelList.Items[index] = namespaceLabelList.Items[len(namespaceLabelList.Items)-1]

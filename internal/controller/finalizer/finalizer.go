@@ -2,7 +2,8 @@ package finalizer
 
 import (
 	"context"
-	v1alpha1 "github.com/oshribelay/namespace-label/api/v1alpha1"
+
+	"github.com/oshribelay/namespace-label/api/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )

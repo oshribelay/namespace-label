@@ -19,10 +19,13 @@ package controller
 import (
 	"context"
 	"fmt"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"path/filepath"
 	"runtime"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"testing"
+
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -103,6 +106,27 @@ var _ = BeforeSuite(func() {
 		err = k8sManager.Start(ctx)
 		Expect(err).ToNot(HaveOccurred(), "failed to run manager")
 	}()
+
+	testNamespace := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "namespace-label-system",
+		},
+	}
+	Expect(k8sClient.Create(ctx, testNamespace)).To(Succeed())
+
+	testConfigMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "namespace-label-protected-labels",
+			Namespace: "namespace-label-system",
+		},
+		Data: map[string]string{
+			"k8s.io":        "",
+			"kubernetes.io": "",
+			"openshift.io":  "",
+		},
+	}
+	Expect(k8sClient.Create(ctx, testConfigMap)).To(Succeed())
+
 })
 
 var _ = AfterSuite(func() {

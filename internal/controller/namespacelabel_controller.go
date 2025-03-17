@@ -18,14 +18,14 @@ package controller
 
 import (
 	"context"
-	"fmt"
+	"github.com/go-logr/logr"
+
 	namespacelabelv1alpha1 "github.com/oshribelay/namespace-label/api/v1alpha1"
 	"github.com/oshribelay/namespace-label/internal/controller/finalizer"
 	"github.com/oshribelay/namespace-label/internal/controller/resources"
 	"github.com/oshribelay/namespace-label/internal/controller/utils"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -39,9 +39,15 @@ type NamespaceLabelReconciler struct {
 	Scheme *runtime.Scheme
 }
 
+const (
+	configMapName      = "namespace-label-protected-labels"
+	configMapNamespace = "namespace-label-system"
+)
+
 // +kubebuilder:rbac:groups=namespacelabel.dana.io,resources=namespacelabels,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=namespacelabel.dana.io,resources=namespacelabels/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=namespacelabel.dana.io,resources=namespacelabels/finalizers,verbs=update
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -70,18 +76,9 @@ func (r *NamespaceLabelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	protectedLabelsConfigMap := corev1.ConfigMap{}
-	if err := r.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("%s-protected-labels-configmap", nsLabel.Name), Namespace: nsLabel.Namespace}, &protectedLabelsConfigMap); err != nil {
-		if apierrors.IsNotFound(err) {
-			logger.Info(fmt.Sprintf("Creating ConfigMap %s-protected-labels-configmap", nsLabel.Name))
-			protectedLabelsConfigMap, err = resources.CreateConfigMap(&nsLabel, r.Client, ctx)
-			if err != nil {
-				logger.Error(err, "Failed to create ConfigMap")
-				return ctrl.Result{}, err
-			}
-		} else {
-			logger.Error(err, "Failed to fetch ConfigMap")
-			return ctrl.Result{}, err
-		}
+	if err := r.Get(ctx, types.NamespacedName{Namespace: configMapNamespace, Name: configMapName}, &protectedLabelsConfigMap); err != nil {
+		logger.Error(err, "get Failed to fetch protected labels ConfigMap")
+		return ctrl.Result{}, err
 	}
 	protectedPrefixes := protectedLabelsConfigMap.Data
 
@@ -90,7 +87,7 @@ func (r *NamespaceLabelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	if !nsLabel.DeletionTimestamp.IsZero() {
-		if err := r.handleDeletion(ctx, req, namespace, nsLabel, protectedPrefixes); err != nil {
+		if err := r.handleDeletion(ctx, req, namespace, nsLabel, protectedPrefixes, logger); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
@@ -120,7 +117,7 @@ func (r *NamespaceLabelReconciler) updateNamespaceLabels(ctx context.Context, re
 	}
 
 	updatedLabels := make(map[string]string)
-	for key, value := range namespace.GetLabels() {
+	for key, value := range namespace.Labels {
 		updatedLabels[key] = value
 	}
 
@@ -152,8 +149,7 @@ func (r *NamespaceLabelReconciler) updateNamespaceLabels(ctx context.Context, re
 }
 
 // handleDeletion handles the deletion of the NamespaceLabel object.
-func (r *NamespaceLabelReconciler) handleDeletion(ctx context.Context, req ctrl.Request, namespace corev1.Namespace, namespaceLabel namespacelabelv1alpha1.NamespaceLabel, protectedPrefixes map[string]string) error {
-	logger := log.FromContext(ctx)
+func (r *NamespaceLabelReconciler) handleDeletion(ctx context.Context, req ctrl.Request, namespace corev1.Namespace, namespaceLabel namespacelabelv1alpha1.NamespaceLabel, protectedPrefixes map[string]string, logger logr.Logger) error {
 	namespaceLabelList := namespacelabelv1alpha1.NamespaceLabelList{}
 	if err := r.List(ctx, &namespaceLabelList, client.InNamespace(namespace.Name)); err != nil {
 		logger.Error(err, "Failed to fetch NamespaceLabels")

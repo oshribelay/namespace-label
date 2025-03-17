@@ -19,8 +19,9 @@ package controller
 import (
 	"context"
 	"fmt"
-	corev1 "k8s.io/api/core/v1"
 	"time"
+
+	corev1 "k8s.io/api/core/v1"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -46,13 +47,11 @@ var _ = Describe("NamespaceLabel Controller", func() {
 			Namespace: "default",
 		}
 		namespacelabel := &namespacelabelv1alpha1.NamespaceLabel{}
-		configMap := &corev1.ConfigMap{}
 
 		BeforeEach(func() {
 			By("creating the custom resource for the Kind NamespaceLabel")
 			// Delete any existing resources to ensure clean state.
-			k8sClient.Delete(ctx, namespacelabel)
-			k8sClient.Delete(ctx, configMap)
+			_ = k8sClient.Delete(ctx, namespacelabel)
 
 			// Create the NamespaceLabel if it does not exist
 			err := k8sClient.Get(ctx, typeNamespacedName, namespacelabel)
@@ -70,47 +69,6 @@ var _ = Describe("NamespaceLabel Controller", func() {
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
-			By("creating the ConfigMap")
-			// Wait for NamespaceLabel to be created
-			Eventually(func() error {
-				return k8sClient.Get(ctx, typeNamespacedName, namespacelabel)
-			}, timeout, interval).Should(Succeed())
-
-			configMap = &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      fmt.Sprintf("%s-protected-labels-configmap", resourceName),
-					Namespace: typeNamespacedName.Namespace,
-					OwnerReferences: []metav1.OwnerReference{
-						*metav1.NewControllerRef(namespacelabel, namespacelabelv1alpha1.GroupVersion.WithKind("NamespaceLabel")),
-					},
-				},
-				Data: map[string]string{
-					"k8s.io":        "",
-					"kubernetes.io": "",
-					"openshift.io":  "",
-				},
-			}
-
-			// Ensure the ConfigMap is deleted before creating it again
-			err = k8sClient.Delete(context.TODO(), &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      fmt.Sprintf("%s-protected-labels-configmap", resourceName),
-					Namespace: typeNamespacedName.Namespace,
-				},
-			})
-			// Only return an error if the ConfigMap exists and can be deleted
-			Expect(err != nil && !errors.IsNotFound(err)).To(BeFalse())
-
-			Expect(k8sClient.Create(ctx, configMap)).To(Succeed())
-
-			createdConfigMap := &corev1.ConfigMap{}
-			Eventually(func() bool {
-				err := k8sClient.Get(ctx, types.NamespacedName{Name: configMap.Name, Namespace: configMap.Namespace}, createdConfigMap)
-				return err == nil
-			}).Should(BeTrue())
-
-			Expect(configMap.OwnerReferences).ToNot(BeEmpty(), "ConfigMap should have an OwnerReference")
-			Expect(configMap.OwnerReferences[0].Name).To(Equal(resourceName), "ConfigMap should be owned be NamespaceLabel")
 		})
 
 		AfterEach(func() {
@@ -133,21 +91,6 @@ var _ = Describe("NamespaceLabel Controller", func() {
 					}
 					return fmt.Sprintf("resource still exists with finalizers: %v", updatedNsLabel.Finalizers)
 				}, timeout, interval).Should(Equal("deleted"), "resource should be fully deleted by the controller")
-
-				By("deleting the ConfigMap")
-				Expect(k8sClient.Delete(ctx, configMap)).To(Succeed())
-
-				By("waiting for the controller to handle deletion")
-				Eventually(func() string {
-					err := k8sClient.Get(ctx, types.NamespacedName{Name: configMap.Name, Namespace: configMap.Namespace}, configMap)
-					if errors.IsNotFound(err) {
-						return "deleted"
-					}
-					if err != nil {
-						return fmt.Sprintf("error checking ConfigMap: %v", err)
-					}
-					return fmt.Sprintf("resource still exists with OwnerReferences: %v", configMap.OwnerReferences)
-				}, timeout, interval).Should(Equal("deleted"), "ConfigMap should be deleted by the controller")
 			}
 		})
 		It("should create the NamespaceLabel if it doesn't exist", func() {
@@ -162,7 +105,7 @@ var _ = Describe("NamespaceLabel Controller", func() {
 				createdConfigMap := &corev1.ConfigMap{}
 				err := k8sClient.Get(
 					ctx,
-					types.NamespacedName{Name: configMap.Name, Namespace: configMap.Namespace},
+					types.NamespacedName{Name: "namespace-label-protected-labels", Namespace: "namespace-label-system"},
 					createdConfigMap,
 				)
 				if err != nil {
@@ -207,7 +150,7 @@ var _ = Describe("NamespaceLabel Controller", func() {
 					return err
 				}
 				return k8sClient.Delete(ctx, deletedNsLabel)
-			}, interval, timeout).Should(Succeed())
+			}, timeout, interval).Should(Succeed())
 
 			By("waiting for the controller to handle deletion")
 			Eventually(func() bool {
@@ -216,7 +159,7 @@ var _ = Describe("NamespaceLabel Controller", func() {
 					return true
 				}
 				return false
-			})
+			}, timeout, interval).Should(BeTrue())
 
 			By("verifying the labels were deleted from the namespace")
 			namespace := &corev1.Namespace{}
@@ -255,7 +198,7 @@ var _ = Describe("NamespaceLabel Controller", func() {
 					return false
 				}
 				return true
-			})
+			}, timeout, interval).Should(BeTrue())
 			Eventually(func() map[string]string {
 				return invalidNamespace.Labels
 			}, timeout, interval).ShouldNot(HaveKeyWithValue("k8s.io", "test-invalid"), "protected label should not have been applied to the namespace")

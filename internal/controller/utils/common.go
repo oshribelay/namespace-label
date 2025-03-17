@@ -12,6 +12,7 @@ func IsReservedLabel(label string, protectedPrefixes map[string]string) bool {
 	return false
 }
 
+// EqualLabels checks if two maps of labels are equal to each other.
 func EqualLabels(a, b map[string]string) bool {
 	if len(a) != len(b) {
 		return false

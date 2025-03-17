@@ -113,6 +113,7 @@ func (r *NamespaceLabelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	return ctrl.Result{}, nil
 }
 
+// updateNamespaceLabels updates the labels of the namespace according to the NamespaceLabel resource
 func (r *NamespaceLabelReconciler) updateNamespaceLabels(ctx context.Context, req ctrl.Request, namespaceLabelList namespacelabelv1alpha1.NamespaceLabelList, namespace corev1.Namespace, protectedPrefixes map[string]string) error {
 	logger := log.FromContext(ctx)
 	desiredLabels := make(map[string]string)
@@ -159,6 +160,7 @@ func (r *NamespaceLabelReconciler) updateNamespaceLabels(ctx context.Context, re
 	return nil
 }
 
+// handleDeletion handles the deletion of the NamespaceLabel object
 func (r *NamespaceLabelReconciler) handleDeletion(ctx context.Context, req ctrl.Request, namespace corev1.Namespace, namespaceLabel namespacelabelv1alpha1.NamespaceLabel, protectedPrefixes map[string]string) error {
 	logger := log.FromContext(ctx)
 	namespaceLabelList := namespacelabelv1alpha1.NamespaceLabelList{}

@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+
 	"github.com/go-logr/logr"
 
 	namespacelabelv1alpha1 "github.com/oshribelay/namespace-label/api/v1alpha1"
@@ -47,7 +48,7 @@ const (
 // +kubebuilder:rbac:groups=namespacelabel.dana.io,resources=namespacelabels,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=namespacelabel.dana.io,resources=namespacelabels/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=namespacelabel.dana.io,resources=namespacelabels/finalizers,verbs=update
-// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -135,7 +136,7 @@ func (r *NamespaceLabelReconciler) updateNamespaceLabels(ctx context.Context, re
 		}
 	}
 
-	if !utils.EqualLabels(updatedLabels, namespace.Labels) {
+	if !utils.EqualLabels(updatedLabels, namespace.GetLabels()) {
 		namespace.Labels = updatedLabels
 		if err := r.Update(ctx, &namespace); err != nil {
 			logger.Error(err, "Failed to update NamespaceLabel")

@@ -9,13 +9,8 @@ rules:
   resources:
   - configmaps
   verbs:
-  - create
-  - delete
   - get
   - list
-  - patch
-  - update
-  - watch
 - apiGroups:
   - namespacelabel.dana.io
   resources:

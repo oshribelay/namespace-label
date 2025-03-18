@@ -19,11 +19,12 @@ package controller
 import (
 	"context"
 	"fmt"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 
@@ -54,6 +55,30 @@ func TestControllers(t *testing.T) {
 	RegisterFailHandler(Fail)
 
 	RunSpecs(t, "Controller Suite")
+}
+
+func createTestNamespace() error {
+	testNamespace := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "namespace-label-system",
+		},
+	}
+	return k8sClient.Create(ctx, testNamespace)
+}
+
+func createTestConfigMap() error {
+	testConfigMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "namespace-label-protected-labels",
+			Namespace: "namespace-label-system",
+		},
+		Data: map[string]string{
+			"k8s.io":        "",
+			"kubernetes.io": "",
+			"openshift.io":  "",
+		},
+	}
+	return k8sClient.Create(ctx, testConfigMap)
 }
 
 var _ = BeforeSuite(func() {
@@ -107,26 +132,8 @@ var _ = BeforeSuite(func() {
 		Expect(err).ToNot(HaveOccurred(), "failed to run manager")
 	}()
 
-	testNamespace := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "namespace-label-system",
-		},
-	}
-	Expect(k8sClient.Create(ctx, testNamespace)).To(Succeed())
-
-	testConfigMap := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "namespace-label-protected-labels",
-			Namespace: "namespace-label-system",
-		},
-		Data: map[string]string{
-			"k8s.io":        "",
-			"kubernetes.io": "",
-			"openshift.io":  "",
-		},
-	}
-	Expect(k8sClient.Create(ctx, testConfigMap)).To(Succeed())
-
+	Expect(createTestNamespace()).To(Succeed())
+	Expect(createTestConfigMap()).To(Succeed())
 })
 
 var _ = AfterSuite(func() {

@@ -1,6 +1,9 @@
 package utils
 
-import "strings"
+import (
+	"math/rand"
+	"strings"
+)
 
 // IsReservedLabel checks if a label has a protected prefix.
 func IsReservedLabel(label string, protectedPrefixes map[string]string) bool {
@@ -25,4 +28,15 @@ func EqualLabels(a, b map[string]string) bool {
 	}
 
 	return true
+}
+
+const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+// GenerateRandomString generates a random string of length n.
+func GenerateRandomString(n int) string {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = charset[rand.Intn(len(charset))]
+	}
+	return string(b)
 }

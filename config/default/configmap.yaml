@@ -1,9 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: protected-labels
-  namespace: system
-data:
-  "k8s.io": ""
-  "kubernetes.io": ""
-  "openshift.io": ""

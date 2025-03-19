@@ -4,8 +4,8 @@ metadata:
   labels:
     app.kubernetes.io/name: namespace-label
     app.kubernetes.io/managed-by: kustomize
-  name: namespacelabel-sample
+  name: namespacelabel-sample2
 spec:
   labels:
-    a: test-a
-    b: test-b
+    c: test-c
+    d: test-d

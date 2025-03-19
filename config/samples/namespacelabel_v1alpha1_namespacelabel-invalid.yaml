@@ -4,8 +4,8 @@ metadata:
   labels:
     app.kubernetes.io/name: namespace-label
     app.kubernetes.io/managed-by: kustomize
-  name: namespacelabel-sample
+  name: namespacelabel-sample-invalid
 spec:
   labels:
-    a: test-a
-    b: test-b
+    k8s.io/invalid: k8s-invalid
+    kubernetes.io/invalid: kubernetes-invalid

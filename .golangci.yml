@@ -26,7 +26,6 @@ linters:
     - gocyclo
     - gofmt
     - goimports
-    - gosimple
     - govet
     - ineffassign
     - lll

@@ -21,11 +21,13 @@ linters:
   enable:
     - dupl
     - errcheck
+    - copyloopvar
     - ginkgolinter
     - goconst
     - gocyclo
     - gofmt
     - goimports
+    - gosimple
     - govet
     - ineffassign
     - lll

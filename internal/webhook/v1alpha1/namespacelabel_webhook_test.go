@@ -40,6 +40,7 @@ var _ = Describe("NamespaceLabel Webhook", func() {
 		obj = &namespacelabelv1alpha1.NamespaceLabel{}
 		oldObj = &namespacelabelv1alpha1.NamespaceLabel{}
 		scheme := runtime.NewScheme()
+
 		Expect(namespacelabelv1alpha1.AddToScheme(scheme)).To(Succeed())
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 		webhook = NamespaceLabelWebhook{

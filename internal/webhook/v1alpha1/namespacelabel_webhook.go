@@ -43,11 +43,6 @@ var namespacelabellog = logf.Log.WithName("namespacelabel-resource")
 //
 // NOTE: The +kubebuilder:object:generate=false marker prevents controller-gen from generating DeepCopy methods,
 // as this struct is used only for temporary operations and does not need to be deeply copied.
-//type NamespaceLabelCustomValidator struct {
-//	Client client.Client
-//}
-//
-//var _ webhook.CustomValidator = &NamespaceLabelCustomValidator{}
 
 type NamespaceLabelWebhook struct {
 	Client  client.Client

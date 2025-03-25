@@ -17,21 +17,23 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"encoding/json"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	admissionv1 "k8s.io/api/admission/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	namespacelabelv1alpha1 "github.com/oshribelay/namespace-label/api/v1alpha1"
-	// TODO (user): Add any additional imports if needed
 )
 
 var _ = Describe("NamespaceLabel Webhook", func() {
 	var (
-		obj       *namespacelabelv1alpha1.NamespaceLabel
-		oldObj    *namespacelabelv1alpha1.NamespaceLabel
-		validator NamespaceLabelCustomValidator
+		obj     *namespacelabelv1alpha1.NamespaceLabel
+		oldObj  *namespacelabelv1alpha1.NamespaceLabel
+		webhook NamespaceLabelWebhook
 	)
 
 	BeforeEach(func() {
@@ -40,10 +42,10 @@ var _ = Describe("NamespaceLabel Webhook", func() {
 		scheme := runtime.NewScheme()
 		Expect(namespacelabelv1alpha1.AddToScheme(scheme)).To(Succeed())
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-		validator = NamespaceLabelCustomValidator{
+		webhook = NamespaceLabelWebhook{
 			Client: fakeClient,
 		}
-		Expect(validator).NotTo(BeNil(), "Expected validator to be initialized")
+		Expect(webhook).NotTo(BeNil(), "Expected validator to be initialized")
 		Expect(oldObj).NotTo(BeNil(), "Expected oldObj to be initialized")
 		Expect(obj).NotTo(BeNil(), "Expected obj to be initialized")
 
@@ -58,18 +60,17 @@ var _ = Describe("NamespaceLabel Webhook", func() {
 	})
 
 	AfterEach(func() {
-		// TODO (user): Add any teardown logic common to all tests
 	})
 
 	Context("When creating or updating NamespaceLabel under Validating Webhook", func() {
 		It("should allow creation of namespacelabel if none are present in the same namespace", func() {
-			warnings, err := validator.ValidateCreate(ctx, obj)
-			Expect(warnings).To(BeNil())
-			Expect(err).To(Not(HaveOccurred()))
+			request := createAdmissionRequest(obj, admissionv1.Create)
+			response := webhook.Handle(ctx, request)
+			Expect(response.Allowed).To(BeTrue())
 		})
 
 		It("should deny creation of namespacelabel if one is present in the same namespace", func() {
-			Expect(validator.Client.Create(ctx, obj)).To(Succeed())
+			Expect(webhook.Client.Create(ctx, obj)).To(Succeed())
 
 			newObj := &namespacelabelv1alpha1.NamespaceLabel{
 				ObjectMeta: metav1.ObjectMeta{Name: "second-test-object"},
@@ -78,28 +79,25 @@ var _ = Describe("NamespaceLabel Webhook", func() {
 				},
 			}
 
-			warnings, err := validator.ValidateCreate(ctx, newObj)
-			Expect(warnings).To(Not(BeNil()))
-			Expect(err).To(HaveOccurred())
+			request := createAdmissionRequest(newObj, admissionv1.Create)
+			response := webhook.Handle(ctx, request)
+			Expect(response.Allowed).To(Not(BeTrue()))
 		})
-		// It("Should deny creation if a required field is missing", func() {
-		//     By("simulating an invalid creation scenario")
-		//     obj.SomeRequiredField = ""
-		//     Expect(validator.ValidateCreate(ctx, obj)).Error().To(HaveOccurred())
-		// })
-		//
-		// It("Should admit creation if all required fields are present", func() {
-		//     By("simulating an invalid creation scenario")
-		//     obj.SomeRequiredField = "valid_value"
-		//     Expect(validator.ValidateCreate(ctx, obj)).To(BeNil())
-		// })
-		//
-		// It("Should validate updates correctly", func() {
-		//     By("simulating a valid update scenario")
-		//     oldObj.SomeRequiredField = "updated_value"
-		//     obj.SomeRequiredField = "updated_value"
-		//     Expect(validator.ValidateUpdate(ctx, oldObj, obj)).To(BeNil())
-		// })
 	})
 
 })
+
+func createAdmissionRequest(obj *namespacelabelv1alpha1.NamespaceLabel, operation admissionv1.Operation) admission.Request {
+	rawObj, err := json.Marshal(obj)
+	Expect(err).To(Not(HaveOccurred()))
+	request := admissionv1.AdmissionRequest{
+		UID:       "test-uid",
+		Kind:      metav1.GroupVersionKind{Group: "namespacelabel.dana.io", Version: "v1alpha1", Kind: "NamespaceLabel"},
+		Resource:  metav1.GroupVersionResource{Group: "namespacelabel.dana.io", Version: "v1alpha1", Resource: "namespacelabels"},
+		Operation: operation,
+		Object:    runtime.RawExtension{Raw: rawObj},
+	}
+
+	admRequest := admission.Request{AdmissionRequest: request}
+	return admRequest
+}

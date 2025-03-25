@@ -18,17 +18,14 @@ package v1alpha1
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"k8s.io/apimachinery/pkg/runtime"
-	ctrl "sigs.k8s.io/controller-runtime"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
-	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
-
 	namespacelabelv1alpha1 "github.com/oshribelay/namespace-label/api/v1alpha1"
+	admissionv1 "k8s.io/api/admission/v1"
+	"k8s.io/apimachinery/pkg/util/json"
+	"net/http"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
 const namespaceLabelAlreadyExists = "a NamespaceLabel already exists in this namespace"
@@ -36,15 +33,6 @@ const namespaceLabelAlreadyExists = "a NamespaceLabel already exists in this nam
 // nolint:unused
 // log is for logging in this package.
 var namespacelabellog = logf.Log.WithName("namespacelabel-resource")
-
-// SetupNamespaceLabelWebhookWithManager registers the webhook for NamespaceLabel in the manager.
-func SetupNamespaceLabelWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).For(&namespacelabelv1alpha1.NamespaceLabel{}).
-		WithValidator(&NamespaceLabelCustomValidator{
-			Client: mgr.GetClient(),
-		}).
-		Complete()
-}
 
 // NOTE: The 'path' attribute must follow a specific pattern and should not be modified directly here.
 // Modifying the path for an invalid path can cause API server errors; failing to locate the webhook.
@@ -55,55 +43,45 @@ func SetupNamespaceLabelWebhookWithManager(mgr ctrl.Manager) error {
 //
 // NOTE: The +kubebuilder:object:generate=false marker prevents controller-gen from generating DeepCopy methods,
 // as this struct is used only for temporary operations and does not need to be deeply copied.
-type NamespaceLabelCustomValidator struct {
-	Client client.Client
+//type NamespaceLabelCustomValidator struct {
+//	Client client.Client
+//}
+//
+//var _ webhook.CustomValidator = &NamespaceLabelCustomValidator{}
+
+type NamespaceLabelWebhook struct {
+	Client  client.Client
+	decoder *admission.Decoder
 }
 
-var _ webhook.CustomValidator = &NamespaceLabelCustomValidator{}
-
-// ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type NamespaceLabel.
-func (v *NamespaceLabelCustomValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	namespacelabel, ok := obj.(*namespacelabelv1alpha1.NamespaceLabel)
-	if !ok {
-		return nil, fmt.Errorf("expected a NamespaceLabel object but got %T", obj)
-	}
-	namespacelabellog.Info("Validate creation of NamespaceLabel", "name", namespacelabel.GetName())
-	exists, err := v.checkIfNamespaceLabelExistsInNamespace(ctx, namespacelabel)
-	if err != nil {
-		return nil, err
-	}
-	if exists {
-		return admission.Warnings{namespaceLabelAlreadyExists}, errors.New(namespaceLabelAlreadyExists)
-	}
-
-	return nil, nil
+func (w *NamespaceLabelWebhook) InjectDecoder(decoder *admission.Decoder) error {
+	w.decoder = decoder
+	return nil
 }
 
-// ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type NamespaceLabel.
-func (v *NamespaceLabelCustomValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
-	namespacelabel, ok := newObj.(*namespacelabelv1alpha1.NamespaceLabel)
-	if !ok {
-		return nil, fmt.Errorf("expected a NamespaceLabel object for the newObj but got %T", newObj)
+func (w *NamespaceLabelWebhook) Handle(ctx context.Context, req admission.Request) admission.Response {
+	namespaceLabel := namespacelabelv1alpha1.NamespaceLabel{}
+	if err := json.Unmarshal(req.Object.Raw, &namespaceLabel); err != nil {
+		return admission.Errored(http.StatusBadRequest, err)
 	}
-	namespacelabellog.Info("Validation for NamespaceLabel upon update", "name", namespacelabel.GetName())
 
-	return nil, nil
+	if req.AdmissionRequest.Operation == admissionv1.Create {
+		exists, err := w.checkIfNamespaceLabelExistsInNamespace(ctx, &namespaceLabel)
+		if err != nil {
+			return admission.Errored(http.StatusInternalServerError, err)
+		}
+
+		if exists {
+			return admission.Denied(namespaceLabelAlreadyExists)
+		}
+	}
+
+	return admission.Allowed("Validation passed")
 }
 
-// ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type NamespaceLabel.
-func (v *NamespaceLabelCustomValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	namespacelabel, ok := obj.(*namespacelabelv1alpha1.NamespaceLabel)
-	if !ok {
-		return nil, fmt.Errorf("expected a NamespaceLabel object but got %T", obj)
-	}
-	namespacelabellog.Info("Validation for NamespaceLabel upon deletion", "name", namespacelabel.GetName())
-
-	return nil, nil
-}
-
-func (v *NamespaceLabelCustomValidator) checkIfNamespaceLabelExistsInNamespace(ctx context.Context, namespaceLabel *namespacelabelv1alpha1.NamespaceLabel) (bool, error) {
+func (w *NamespaceLabelWebhook) checkIfNamespaceLabelExistsInNamespace(ctx context.Context, namespaceLabel *namespacelabelv1alpha1.NamespaceLabel) (bool, error) {
 	existingNsLabels := namespacelabelv1alpha1.NamespaceLabelList{}
-	if err := v.Client.List(ctx, &existingNsLabels, client.InNamespace(namespaceLabel.Namespace)); err != nil {
+	if err := w.Client.List(ctx, &existingNsLabels, client.InNamespace(namespaceLabel.Namespace)); err != nil {
 		namespacelabellog.Error(err, "Failed to list NamespaceLabels", "name", namespaceLabel.GetName())
 		return true, err
 	}
@@ -113,4 +91,22 @@ func (v *NamespaceLabelCustomValidator) checkIfNamespaceLabelExistsInNamespace(c
 	}
 
 	return false, nil
+}
+
+// SetupNamespaceLabelWebhookWithManager registers the webhook for NamespaceLabel in the manager.
+func SetupNamespaceLabelWebhookWithManager(mgr ctrl.Manager) error {
+	webhook := &NamespaceLabelWebhook{Client: mgr.GetClient()}
+
+	err := ctrl.NewWebhookManagedBy(mgr).For(&namespacelabelv1alpha1.NamespaceLabel{}).
+		WithCustomPath("/validate-namespacelabel-dana-io-v1alpha1-namespacelabel").
+		Complete()
+	if err != nil {
+		return err
+	}
+
+	mgr.GetWebhookServer().Register("/validate-namespacelabel-dana-io-v1alpha1-namespacelabel", &admission.Webhook{
+		Handler: webhook,
+	})
+
+	return nil
 }

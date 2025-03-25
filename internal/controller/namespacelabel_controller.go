@@ -18,6 +18,8 @@ package controller
 
 import (
 	"context"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/go-logr/logr"
 
@@ -48,7 +50,8 @@ const (
 // +kubebuilder:rbac:groups=namespacelabel.dana.io,resources=namespacelabels,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=namespacelabel.dana.io,resources=namespacelabels/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=namespacelabel.dana.io,resources=namespacelabels/finalizers,verbs=update
-// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;update;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -175,9 +178,31 @@ func (r *NamespaceLabelReconciler) handleDeletion(ctx context.Context, req ctrl.
 	return nil
 }
 
+func (r *NamespaceLabelReconciler) findNamespaceLabelsForNamespace(ctx context.Context, namespace client.Object) []reconcile.Request {
+	namespaceLabelList := namespacelabelv1alpha1.NamespaceLabelList{}
+	if err := r.List(ctx, &namespaceLabelList, client.InNamespace(namespace.GetNamespace())); err != nil {
+		return nil
+	}
+
+	requests := []reconcile.Request{}
+	for _, nsLabel := range namespaceLabelList.Items {
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      nsLabel.Name,
+				Namespace: nsLabel.Namespace,
+			},
+		})
+	}
+	return requests
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *NamespaceLabelReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&namespacelabelv1alpha1.NamespaceLabel{}).
+		Watches(
+			&corev1.Namespace{},
+			handler.EnqueueRequestsFromMapFunc(r.findNamespaceLabelsForNamespace),
+		).
 		Complete(r)
 }

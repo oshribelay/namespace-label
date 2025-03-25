@@ -11,6 +11,16 @@ rules:
   verbs:
   - get
   - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - update
+  - watch
 - apiGroups:
   - namespacelabel.dana.io
   resources:

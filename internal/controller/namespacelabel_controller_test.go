@@ -21,17 +21,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/oshribelay/namespace-label/internal/controller/utils"
-
-	corev1 "k8s.io/api/core/v1"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	namespacelabelv1alpha1 "github.com/oshribelay/namespace-label/api/v1alpha1"
+	"github.com/oshribelay/namespace-label/internal/controller/utils"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-
-	namespacelabelv1alpha1 "github.com/oshribelay/namespace-label/api/v1alpha1"
 )
 
 var (
@@ -169,10 +166,7 @@ var _ = Describe("NamespaceLabel Controller", func() {
 			By("waiting for the controller to handle deletion")
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, typeNamespacedName, deletedNsLabel)
-				if errors.IsNotFound(err) {
-					return true
-				}
-				return false
+				return errors.IsNotFound(err)
 			}, timeout, interval).Should(BeTrue())
 
 			By("verifying the labels were deleted from the namespace")
@@ -206,20 +200,14 @@ var _ = Describe("NamespaceLabel Controller", func() {
 					return false
 				}
 				err = k8sClient.Get(ctx, types.NamespacedName{Name: "default"}, invalidNamespace)
-				if err != nil {
-					return false
-				}
-				return true
+				return err == nil
 			}, timeout, interval).Should(BeTrue())
 			Eventually(func() map[string]string {
 				return invalidNamespace.Labels
 			}, timeout, interval).ShouldNot(HaveKeyWithValue("k8s.io", "test-invalid"), "protected label should not have been applied to the namespace")
 			Eventually(func() bool {
 				err := k8sClient.Delete(ctx, invalidResource)
-				if err != nil {
-					return false
-				}
-				return true
+				return err == nil
 			}, timeout, interval).Should(BeTrue())
 		})
 	})

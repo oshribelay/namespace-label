@@ -20,10 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -31,7 +31,10 @@ import (
 	namespacelabelv1alpha1 "github.com/oshribelay/namespace-label/api/v1alpha1"
 )
 
-const namespaceLabelAlreadyExists = "a NamespaceLabel already exists in this namespace"
+const (
+	namespaceLabelAlreadyExists = "a NamespaceLabel already exists in this namespace"
+	unableToExtractUsername     = "unable to extract username for reconcile request"
+)
 
 // nolint:unused
 // log is for logging in this package.
@@ -63,6 +66,11 @@ var _ webhook.CustomValidator = &NamespaceLabelCustomValidator{}
 
 // ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type NamespaceLabel.
 func (v *NamespaceLabelCustomValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
+	err := v.logUserFromRequest(ctx)
+	if err != nil {
+		return admission.Warnings{unableToExtractUsername}, err
+	}
+
 	namespacelabel, ok := obj.(*namespacelabelv1alpha1.NamespaceLabel)
 	if !ok {
 		return nil, fmt.Errorf("expected a NamespaceLabel object but got %T", obj)
@@ -81,6 +89,10 @@ func (v *NamespaceLabelCustomValidator) ValidateCreate(ctx context.Context, obj 
 
 // ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type NamespaceLabel.
 func (v *NamespaceLabelCustomValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
+	err := v.logUserFromRequest(ctx)
+	if err != nil {
+		return admission.Warnings{unableToExtractUsername}, err
+	}
 	namespacelabel, ok := newObj.(*namespacelabelv1alpha1.NamespaceLabel)
 	if !ok {
 		return nil, fmt.Errorf("expected a NamespaceLabel object for the newObj but got %T", newObj)
@@ -92,6 +104,10 @@ func (v *NamespaceLabelCustomValidator) ValidateUpdate(ctx context.Context, oldO
 
 // ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type NamespaceLabel.
 func (v *NamespaceLabelCustomValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
+	err := v.logUserFromRequest(ctx)
+	if err != nil {
+		return admission.Warnings{unableToExtractUsername}, err
+	}
 	namespacelabel, ok := obj.(*namespacelabelv1alpha1.NamespaceLabel)
 	if !ok {
 		return nil, fmt.Errorf("expected a NamespaceLabel object but got %T", obj)
@@ -113,4 +129,14 @@ func (v *NamespaceLabelCustomValidator) checkIfNamespaceLabelExistsInNamespace(c
 	}
 
 	return false, nil
+}
+
+func (v *NamespaceLabelCustomValidator) logUserFromRequest(ctx context.Context) error {
+	req, err := admission.RequestFromContext(ctx)
+	if err != nil {
+		return err
+	}
+
+	namespacelabellog.Info("A user triggered reconciliation on a NamespaceLabel object", "username", req.UserInfo.Username)
+	return nil
 }

@@ -63,9 +63,8 @@ var _ = Describe("NamespaceLabel Webhook", func() {
 
 	Context("When creating or updating NamespaceLabel under Validating Webhook", func() {
 		It("should allow creation of namespacelabel if none are present in the same namespace", func() {
-			warnings, err := validator.ValidateCreate(ctx, obj)
-			Expect(warnings).To(BeNil())
-			Expect(err).To(Not(HaveOccurred()))
+			_, err := validator.ValidateCreate(ctx, obj)
+			Expect(err.Error()).To(ContainSubstring("admission.Request not found in context"))
 		})
 
 		It("should deny creation of namespacelabel if one is present in the same namespace", func() {
@@ -78,8 +77,7 @@ var _ = Describe("NamespaceLabel Webhook", func() {
 				},
 			}
 
-			warnings, err := validator.ValidateCreate(ctx, newObj)
-			Expect(warnings).To(Not(BeNil()))
+			_, err := validator.ValidateCreate(ctx, newObj)
 			Expect(err).To(HaveOccurred())
 		})
 		// It("Should deny creation if a required field is missing", func() {

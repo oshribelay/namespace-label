@@ -15,6 +15,7 @@ namePrefix: namespace-label-
 #    someName: someValue
 
 resources:
+- filebeat-config.yaml
 - ../crd
 - ../rbac
 - ../manager
